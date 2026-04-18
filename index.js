@@ -1,12 +1,11 @@
 require ("dotenv").config()
 
-
 const express = require('express')
 const cors = require('cors')
 const cookieParser = require('cookie-parser')
-const mysql = require('mysql2/promise')
 const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
+const database = require('./database.js')
 
 // --- config ---
 const PORT = process.env.PORT;
@@ -23,14 +22,6 @@ const COOKIE_OPTS = {
     maxAge: 7 * 24 * 60 * 60 * 1000
 }
 
-// --- adatbázis beállítás ---
-const db = mysql.createPool({
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME   
-})
 
 // --- APP ---
 const app = express()
@@ -41,6 +32,8 @@ app.use(cors({
     origin: 'http://localhost:5173',
     credentials: true
 }))
+
+database.validdb();
 
 // --- Middleware ---
 function auth(req, res, next) {
@@ -63,12 +56,12 @@ app.post('/api/register', async (req, res) => {
         return res.status(400).json({ message: "Minden mezőt ki kell tölteni!" })
     }
     try {
-        const [exists] = await db.query('SELECT id FROM users WHERE username = ?', [username])
+        const [exists] = await database.db.query('SELECT id FROM users WHERE username = ?', [username])
         if (exists.length) {
             return res.status(402).json({ message: "Ez a felhasználónév már foglalt!" })
         }
         const hash = await bcrypt.hash(password, 10)
-        const [result] = await db.query(
+        const [result] = await database.db.query(
             'INSERT INTO users (name, username, password) VALUES (?, ?, ?)',
             [name, username, hash]
         )
@@ -85,7 +78,7 @@ app.post('/api/login', async (req, res) => {
         return res.status(400).json({ message: "Minden mezőt ki kell tölteni!" })
     }
     try {
-        const [rows] = await db.query('SELECT * FROM users WHERE username = ?', [username])
+        const [rows] = await database.db.query('SELECT * FROM users WHERE username = ?', [username])
         if (!rows.length) {
             return res.status(401).json({ message: "Hibás felhasználónév vagy jelszó!" })
         }
@@ -121,7 +114,7 @@ app.get('/api/me', auth, (req, res) => {
 
 app.get('/api/notes', auth, async (req, res) => {
     try {
-        const [notes] = await db.query(
+        const [notes] = await database.db.query(
             'SELECT * FROM notes WHERE user_id = ? ORDER BY created_at DESC',
             [req.user.id]
         )
@@ -138,7 +131,7 @@ app.post('/api/notes', auth, async (req, res) => {
         return res.status(400).json({ message: "Minden mezőt ki kell tölteni!" })
     }
     try {
-        await db.query(
+        await database.db.query(
             'INSERT INTO notes (user_id, title, content) VALUES (?, ?, ?)',
             [req.user.id, title, content]
         )
@@ -156,7 +149,7 @@ app.put('/api/notes/:id', auth, async (req, res) => {
         return res.status(400).json({ message: "Minden mezőt ki kell tölteni!" })
     }
     try {
-        const [result] = await db.query(
+        const [result] = await database.db.query(
             'UPDATE notes SET title = ?, content = ? WHERE id = ? AND user_id = ?',
             [title, content, id, req.user.id]
         )
@@ -173,7 +166,7 @@ app.put('/api/notes/:id', auth, async (req, res) => {
 app.delete('/api/notes/:id', auth, async (req, res) => {
     const { id } = req.params
     try {
-        const [result] = await db.query(
+        const [result] = await database.db.query(
             'DELETE FROM notes WHERE id = ? AND user_id = ?',
             [id, req.user.id]
         )
@@ -193,11 +186,11 @@ app.put('/api/username', auth, async (req, res) => {
         return res.status(400).json({ message: "Az új felhasználónév megadása kötelező" })
     }
     try {
-        const [exists] = await db.query('SELECT id FROM users WHERE username = ?', [ujUsername])
+        const [exists] = await database.db.query('SELECT id FROM users WHERE username = ?', [ujUsername])
         if (exists.length) {
             return res.status(402).json({ message: "Ez a felhasználónév már foglalt!" })
         }
-        await db.query('UPDATE users SET username = ? WHERE id = ?', [ujUsername, req.user.id])
+        await database.db.query('UPDATE users SET username = ? WHERE id = ?', [ujUsername, req.user.id])
         return res.status(200).json({ message: "Sikeresen módosult a felhasználónév" })
     } catch (error) {
         console.log(error)
@@ -211,13 +204,13 @@ app.put('/api/jelszo', auth, async (req, res) => {
         return res.status(400).json({ message: "Hiányzó bemeneti adatok" })
     }
     try {
-        const [rows] = await db.query('SELECT * FROM users WHERE id = ?', [req.user.id])
+        const [rows] = await database.db.query('SELECT * FROM users WHERE id = ?', [req.user.id])
         const ok = await bcrypt.compare(jelenlegiJelszo, rows[0].password)
         if (!ok) {
             return res.status(401).json({ message: "A régi jelszó nem helyes" })
         }
         const hash = await bcrypt.hash(ujJelszo, 10)
-        await db.query('UPDATE users SET password = ? WHERE id = ?', [hash, req.user.id])
+        await database.db.query('UPDATE users SET password = ? WHERE id = ?', [hash, req.user.id])
         return res.status(200).json({ message: "Sikeresen módosult a jelszavad" })
     } catch (error) {
         console.log(error)
@@ -227,7 +220,7 @@ app.put('/api/jelszo', auth, async (req, res) => {
 
 app.delete('/api/fiokom', auth, async (req, res) => {
     try {
-        await db.query('DELETE FROM users WHERE id = ?', [req.user.id])
+        await database.db.query('DELETE FROM users WHERE id = ?', [req.user.id])
         res.clearCookie(COOKIE_NAME, { path: '/' })
         return res.status(200).json({ message: "Sikeres fióktörlés" })
     } catch (error) {
