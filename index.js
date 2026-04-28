@@ -38,19 +38,27 @@ const app = express()
 app.use(express.json())
 app.use(cookieParser())
 app.use(cors({
-    origin: 'http://localhost:5173',
+    origin: ['http://localhost:5173', 'https://jegyzetapp.netlify.app'],
     credentials: true
 }))
 
 // --- Middleware ---
-function auth(req, res, next) {
-    const token = req.cookies[COOKIE_NAME]
-    if (!token) {
+
+async function auth(req, res, next) {
+    const token = req.cookies[COOKIE_NAME];
+    if (!token) { // le van járva a cookie --> nem érvényes
         return res.status(409).json({ message: "Nincs bejelentkezés" })
     }
     try {
-        req.user = jwt.verify(token, JWT_SECRET)
-        next()
+        // tokenből kinyerni a felhasználói adatokat!
+        const user = jwt.verify(token, JWT_SECRET)
+        const sql = 'SELECT * FROM users WHERE id = ?'
+        const [rows] = await db.query(sql, [user.id]);
+        if (rows.length) {
+            const user = rows[0];
+            req.user= { id: user.id, name:user.name , username: user.username}
+        } 
+        next(); // haladhat tovább a végpontban
     } catch (error) {
         return res.status(410).json({ message: "Nem érvényes token" })
     }
